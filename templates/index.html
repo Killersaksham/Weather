@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Real-Time Weather</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <style>
+    body {
+        font-family: 'Poppins', sans-serif;
+        background: linear-gradient(135deg, #1E417C, #2c5d9f);
+        transition: background 1s ease-in-out;
+        color: white;
+    }
+    /* Dynamic Backgrounds */
+    .clear-day { background: linear-gradient(135deg, #3a7bd5, #00d2ff); }
+    .clear-night { background: linear-gradient(135deg, #0f2027, #203a43, #2c5364); }
+    .cloudy-day { background: linear-gradient(135deg, #607d8b, #758b97, #99a2aa); }
+    .cloudy-night { background: linear-gradient(135deg, #1f282e, #475865, #5f6d7d); }
+    .rain-day { background: linear-gradient(135deg, #6c7a89, #4b545f, #323d47); }
+    .rain-night { background: linear-gradient(135deg, #2c3e50, #42586e, #536f87); }
+    .storm-day { background: linear-gradient(135deg, #444a50, #2d2d30, #1c1c1f); }
+    .storm-night { background: linear-gradient(135deg, #1c1c1f, #2d2d30, #444a50); }
+    .snow-day { background: linear-gradient(135deg, #e0eafc, #c7d2e0); }
+    .snow-night { background: linear-gradient(135deg, #2a3a4c, #4c5a6c, #6c788c); }
+
+    .weather-card, .search-container {
+      background-color: rgba(0,0,0,0.2);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255,255,255,0.1);
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+      border-radius: 1.5rem;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+    .weather-card:hover, .search-container:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 8px 25px rgba(0,0,0,0.3);
+    }
+    .hidden { display: none; }
+    .loader {
+        border: 4px solid #f3f3f3;
+        border-top: 4px solid #f6da07;
+        border-radius: 50%;
+        width: 40px;
+        height: 40px;
+        animation: spin 1s linear infinite;
+        margin: 20px auto;
+    }
+    @keyframes spin {
+        0%{transform:rotate(0deg);}
+        100%{transform:rotate(360deg);}
+    }
+    @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(20px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    #weather-results { animation: fadeIn 0.8s ease-out; }
+
+    .forecast-box {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        border: 1px solid rgba(255,255,255,0.1);
+        border-radius: 0.75rem;
+        padding: 0.75rem;
+        background: rgba(255,255,255,0.08);
+        position: relative;
+    }
+    .forecast-left {
+        flex: 1;
+        border-right: 1px solid rgba(255,255,255,0.1);
+        padding-right: 12px;
+        text-align: center;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    }
+    .forecast-left .temp{font-size:20px; font-weight:bold; margin-bottom:6px;}
+    .forecast-left .rain{font-size:14px; color: #FFFFFF; margin-bottom:6px;}
+    .forecast-left .icon {
+        font-size: 3rem;
+        line-height: 1;
+        margin-bottom: 0.5rem;
+    }
+    .forecast-right{
+        flex: 2;
+        padding-left: 12px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-around;
+    }
+    .forecast-right p{margin:3px 0; font-size:14px;}
+    .forecast-right .time, .forecast-right .date{font-size:13px; color:#d1d5db; font-style:italic;}
+    .rain-bar-container {
+        width: 100%;
+        height: 10px;
+        background: rgba(255, 255, 255, 0.5);
+        border-radius: 5px;
+        overflow: hidden;
+        margin-top: 5px;
+    }
+    .rain-bar {
+        height: 100%;
+        background-color: #4682B4;
+        transition: width 0.5s ease-in-out;
+    }
+    #hourly-grid, #daily-grid{max-height:500px; overflow-y:auto; padding-right:5px;}
+    #map{height:400px;width:100%; margin-top:1rem; border-radius:1rem;}
+    #current-split{display:flex; gap:1rem; flex-wrap:wrap;}
+    #current-temp-rain{flex:1; background:rgba(255,255,255,0.1); padding:1rem; border-radius:1rem; text-align:center;}
+    #current-info{
+      flex:2;
+      display:grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 0.5rem 1.5rem;
+    }
+    #current-info p{ margin:0; }
+  </style>
+</head>
+<body class="text-white p-4 sm:p-6 md:p-8 flex justify-center items-start min-h-screen">
+<div class="container w-full max-w-4xl mx-auto">
+  <div class="search-container p-6 rounded-2xl shadow-lg mb-8">
+    <h2 class="text-2xl font-bold text-center mb-4">Weather Forecast</h2>
+    <form id="search-form" class="flex flex-col sm:flex-row gap-4">
+      <input type="text" id="location-input" list="cities" class="w-full px-4 py-3 rounded-lg border border-white/20 bg-white/10 focus:bg-white/20 focus:border-yellow-400 focus:outline-none transition placeholder:text-gray-300" placeholder="Enter City Name (e.g., London)" required>
+      <datalist id="cities"></datalist>
+      <button type="submit" class="w-full sm:w-auto bg-yellow-400 hover:bg-yellow-500 text-slate-800 font-bold py-3 px-6 rounded-lg transition">Search</button>
+    </form>
+    <p id="geolocation-status" class="text-center text-sm mt-4 text-gray-300">Attempting to get your location...</p>
+    <div class="flex justify-center mt-3">
+      <button id="toggle-units" class="bg-white/20 px-3 py-1 rounded-md text-sm">Switch to °F</button>
+    </div>
+  </div>
+
+  <div class="weather-card p-6 rounded-2xl shadow-lg mb-8">
+    <h3 class="text-xl font-semibold mb-3">Favorite Locations</h3>
+    <div id="favorites-container" class="flex flex-wrap gap-2">
+      <p id="no-favorites" class="text-gray-400">No favorites saved.</p>
+    </div>
+  </div>
+
+  <div id="loader" class="loader hidden"></div>
+  <div id="error-message" class="error-card rounded-lg p-4 text-center text-red-300 bg-red-500/20 hidden"></div>
+
+  <div id="weather-results" class="hidden">
+    <header class="text-center mb-8">
+      <h1 id="location-name" class="text-4xl font-bold"></h1>
+      <button id="save-favorite" class="bg-white/20 text-white text-sm px-4 py-2 rounded-lg mt-2 transition">Save as Favorite</button>
+      <p id="current-time" class="text-gray-300"></p>
+    </header>
+
+    <main class="grid grid-cols-1 gap-8">
+      <section class="weather-card p-6 rounded-2xl shadow-lg">
+        <div id="current-split">
+          <div id="current-temp-rain">
+            <div id="current-temp" class="text-6xl font-bold"></div>
+            <p id="current-condition" class="text-lg mt-2"></p>
+            <p id="current-rain" class="text-xl mt-2"></p>
+          </div>
+          <div id="current-info">
+            <p id="high-low" class="text-lg"></p>
+            <p id="uv-index" class="text-lg"></p>
+            <p id="wind" class="text-lg"></p>
+            <p id="wind-gusts" class="text-lg"></p>
+            <p id="humidity" class="text-lg"></p>
+            <p id="visibility" class="text-lg"></p>
+            <p id="sunrise-sunset" class="text-lg"></p>
+          </div>
+        </div>
+      </section>
+
+      <section class="weather-card p-6 rounded-2xl shadow-lg">
+        <h2 class="text-2xl font-bold text-center mb-4">Hourly Forecast</h2>
+        <div id="hourly-grid" class="flex flex-col gap-4"></div>
+      </section>
+
+      <section class="weather-card p-6 rounded-2xl shadow-lg">
+        <h2 class="text-2xl font-bold text-center mb-4">7-Day Forecast</h2>
+        <div id="daily-grid" class="flex flex-col gap-3"></div>
+      </section>
+
+      <section class="weather-card p-6 rounded-2xl shadow-lg">
+        <h2 class="text-2xl font-bold text-center mb-4">Map of India</h2>
+        <div id="map"></div>
+      </section>
+    </main>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const searchForm = document.getElementById('search-form');
+const locationInput = document.getElementById('location-input');
+const citiesDatalist = document.getElementById('cities');
+const weatherResults = document.getElementById('weather-results');
+const loader = document.getElementById('loader');
+const errorMessage = document.getElementById('error-message');
+const geolocationStatus = document.getElementById('geolocation-status');
+const toggleUnitsBtn = document.getElementById('toggle-units');
+const saveFavoriteBtn = document.getElementById('save-favorite');
+const favoritesContainer = document.getElementById('favorites-container');
+const noFavoritesMessage = document.getElementById('no-favorites');
+const body = document.body;
+let useFahrenheit = false;
+let map;
+let timezone = null;
+let timeInterval = null;
+let debounceTimeout;
+let currentLocationName = '';
+
+let indiaCities = [
+  // Major Indian Cities
+  {name:"New Delhi", lat:28.6139, lon:77.2090},
+  {name:"Mumbai", lat:19.0760, lon:72.8777},
+  {name:"Bengaluru", lat:12.9716, lon:77.5946},
+  {name:"Chennai", lat:13.0827, lon:80.2707},
+  {name:"Kolkata", lat:22.5726, lon:88.3639},
+  {name:"Hyderabad", lat:17.3850, lon:78.4867},
+  {name:"Pune", lat:18.5204, lon:73.8567},
+  {name:"Jaipur", lat:26.9124, lon:75.7873},
+  {name:"Ahmedabad", lat:23.0225, lon:72.5714},
+  {name:"Srinagar", lat:34.0837, lon:74.7973},
+  {name:"Guwahati", lat:26.1445, lon:91.7362},
+  {name:"Goa", lat:15.2993, lon:74.1240},
+
+  // Cities in Uttar Pradesh
+  {name:"Lucknow", lat:26.8467, lon:80.9462},
+  {name:"Kanpur", lat:26.4499, lon:80.3319},
+  {name:"Varanasi", lat:25.3176, lon:82.9739},
+  {name:"Agra", lat:27.1767, lon:78.0081},
+  {name:"Prayagraj", lat:25.4358, lon:81.8463},
+  {name:"Meerut", lat:28.9845, lon:77.7064},
+  {name:"Bareilly", lat:28.3670, lon:79.4304},
+  {name:"Ghaziabad", lat:28.6692, lon:77.4538},
+  {name:"Aligarh", lat:27.8974, lon:78.0880},
+  {name:"Moradabad", lat:28.8385, lon:78.7731},
+  {name:"Saharanpur", lat:29.9644, lon:77.5452},
+  {name:"Gorakhpur", lat:26.7606, lon:83.3731},
+  {name:"Noida", lat:28.5355, lon:77.3910},
+  {name:"Firozabad", lat:27.1643, lon:78.4019},
+  {name:"Jhansi", lat:25.4484, lon:78.5685},
+
+  // Cities in Madhya Pradesh
+  {name:"Bhopal", lat:23.2599, lon:77.4126},
+  {name:"Indore", lat:22.7196, lon:75.8577},
+  {name:"Jabalpur", lat:23.1645, lon:79.9324},
+  {name:"Gwalior", lat:26.2124, lon:78.1772},
+  {name:"Ujjain", lat:23.1793, lon:75.7865},
+  {name:"Sagar", lat:23.8388, lon:78.7378},
+  {name:"Rewa", lat:24.5369, lon:81.3093},
+  {name:"Satna", lat:24.5878, lon:80.8339},
+  {name:"Burhanpur", lat:21.3023, lon:75.7483},
+  {name:"Khandwa", lat:21.8211, lon:76.3547},
+  {name:"Damoh", lat:23.8344, lon:79.4441},
+  {name:"Chhindwara", lat:22.0622, lon:78.9348},
+  {name:"Katni", lat:23.8315, lon:80.3951},
+  {name:"Dewas", lat:22.9691, lon:76.0531},
+
+  // South Indian Cities
+  {name:"Kochi", lat:9.9312, lon:76.2673},
+  {name:"Visakhapatnam", lat:17.6868, lon:83.2185},
+  {name:"Coimbatore", lat:11.0168, lon:76.9558},
+  {name:"Madurai", lat:9.9252, lon:78.1198},
+  {name:"Vijayawada", lat:16.5062, lon:80.6480},
+
+  // East Indian Cities
+  {name:"Bhubaneswar", lat:20.2961, lon:85.8245},
+  {name:"Raipur", lat:21.2514, lon:81.6296},
+  {name:"Patna", lat:25.5941, lon:85.1376},
+  {name:"Ranchi", lat:23.3441, lon:85.3096},
+  {name:"Siliguri", lat:26.7271, lon:88.4324}
+];
+
+const weatherCodes = {
+  0:{desc:"Clear sky", icon:"☀️", category: "clear"},
+  1:{desc:"Mainly clear", icon:"🌤️", category: "clear"},
+  2:{desc:"Partly cloudy", icon:"⛅", category: "cloudy"},
+  3:{desc:"Overcast", icon:"☁️", category: "cloudy"},
+  45:{desc:"Fog", icon:"🌫️", category: "cloudy"},
+  48:{desc:"Depositing rime fog", icon:"🌫️", category: "cloudy"},
+  51:{desc:"Light drizzle", icon:"💧", category: "rain"},
+  53:{desc:"Moderate drizzle", icon:"🌧️", category: "rain"},
+  55:{desc:"Dense drizzle", icon:"🌧️", category: "rain"},
+  61:{desc:"Rain", icon:"☔", category: "rain"},
+  63:{desc:"Moderate rain", icon:"🌧️", category: "rain"},
+  65:{desc:"Heavy rain", icon:"⛈️", category: "rain"},
+  71:{desc:"Snow", icon:"🌨️", category: "snow"},
+  73:{desc:"Moderate snow", icon:"❄️", category: "snow"},
+  75:{desc:"Heavy snow", icon:"☃️", category: "snow"},
+  80:{desc:"Showers", icon:"🚿", category: "rain"},
+  81:{desc:"Heavy showers", icon:"⛈️", category: "rain"},
+  95:{desc:"Thunderstorm", icon:"⚡", category: "storm"},
+  99:{desc:"Severe thunderstorm", icon:"🌩️", category: "storm"}
+};
+
+const updateBackground = (weatherCategory, isDay) => {
+    body.className = body.className.split(' ').filter(c => !c.endsWith('-day') && !c.endsWith('-night')).join(' ');
+    let newClass = 'clear-day';
+    if (weatherCategory === 'clear') { newClass = isDay ? 'clear-day' : 'clear-night'; }
+    else if (weatherCategory === 'cloudy') { newClass = isDay ? 'cloudy-day' : 'cloudy-night'; }
+    else if (weatherCategory === 'rain') { newClass = isDay ? 'rain-day' : 'rain-night'; }
+    else if (weatherCategory === 'snow') { newClass = isDay ? 'snow-day' : 'snow-night'; }
+    else if (weatherCategory === 'storm') { newClass = isDay ? 'storm-day' : 'storm-night'; }
+    body.classList.add(newClass);
+};
+
+const updateLocalTime = () => {
+    if (timezone) {
+        document.getElementById('current-time').textContent = `Local Time: ${new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second: '2-digit', timeZone: timezone })}`;
+    }
+};
+
+const displayError=(msg)=>{ errorMessage.textContent=msg; errorMessage.classList.remove('hidden'); weatherResults.classList.add('hidden'); };
+const showLoader=(show)=>{ loader.classList.toggle('hidden',!show); };
+const cToF=(c)=>Math.round((c*9)/5+32);
+
+const displayWeather=(data)=>{
+  if (!data || !data.current_weather || !data.hourly || !data.daily) {
+      displayError('Incomplete weather data received from API.');
+      return;
+  }
+  const { current_weather, hourly, daily } = data;
+  timezone = data.timezone;
+  currentLocationName = data.locationName;
+  updateSaveFavoriteButtonState(currentLocationName);
+
+  if (timeInterval) { clearInterval(timeInterval); }
+  timeInterval = setInterval(updateLocalTime, 1000);
+
+  document.getElementById('location-name').textContent=data.locationName;
+  updateLocalTime();
+
+  const isFavorite = JSON.parse(localStorage.getItem('favorites'))?.includes(currentLocationName);
+  if (isFavorite) {
+    saveFavoriteBtn.textContent = 'Favorite Saved';
+    saveFavoriteBtn.disabled = true;
+    saveFavoriteBtn.classList.remove('hover:bg-white/30');
+  } else {
+    saveFavoriteBtn.textContent = 'Save as Favorite';
+    saveFavoriteBtn.disabled = false;
+    saveFavoriteBtn.classList.add('hover:bg-white/30');
+  }
+
+  const currentTime = new Date(current_weather.time);
+  const sunrise = new Date(daily.sunrise[0]);
+  const sunset = new Date(daily.sunset[0]);
+  const isDay = currentTime > sunrise && currentTime < sunset;
+  const weatherCategory = weatherCodes[current_weather.weathercode]?.category || 'clear';
+  updateBackground(weatherCategory, isDay);
+
+  let temp=current_weather.temperature;
+  let feelsLike=hourly.apparent_temperature[hourly.time.indexOf(current_weather.time)];
+  let high=daily.temperature_2m_max[0];
+  let low=daily.temperature_2m_min[0];
+  let rainProb = hourly.precipitation_probability?.[hourly.time.indexOf(current_weather.time)] ?? 0;
+
+  if(useFahrenheit){
+    temp=cToF(temp);
+    feelsLike=cToF(feelsLike);
+    high=cToF(high);
+    low=cToF(low);
+  }
+
+  document.getElementById('current-temp').textContent=`${Math.round(temp)}°${useFahrenheit?'F':'C'}`;
+  document.getElementById('current-condition').textContent=weatherCodes[current_weather.weathercode]?.desc||'N/A';
+  document.getElementById('current-rain').textContent = (rainProb > 0) ? `Rain Probability: ${rainProb}%` : 'No rain expected';
+
+  document.getElementById('high-low').textContent=`H: ${Math.round(high)}° / L: ${Math.round(low)}°`;
+  document.getElementById('wind').textContent=`Wind: ${current_weather.windspeed} km/h`;
+  document.getElementById('wind-gusts').textContent = `Gusts: ${hourly.wind_gusts_10m?.[0] ?? 'N/A'} km/h`;
+  document.getElementById('humidity').textContent = `Humidity: ${hourly.relative_humidity_2m?.[0] ?? 'N/A'}%`;
+  document.getElementById('uv-index').textContent = `UV Index: ${daily.uv_index_max?.[0] ?? 'N/A'}`;
+  document.getElementById('visibility').textContent = `Visibility: ${hourly.visibility?.[0] ? `${(hourly.visibility[0] / 1000).toFixed(1)} km` : 'N/A'}`;
+
+  if(daily.sunrise && daily.sunset){
+    document.getElementById('sunrise-sunset').textContent=`🌅 ${new Date(daily.sunrise[0]).toLocaleTimeString([], {hour:'2-digit'})} / 🌇 ${new Date(daily.sunset[0]).toLocaleTimeString([], {hour:'2-digit'})}`;
+  }
+
+  // Hourly Forecast
+  const hourlyGrid=document.getElementById('hourly-grid'); hourlyGrid.innerHTML='';
+  const startIndex = hourly.time.findIndex(t => t.includes(current_weather.time.slice(0, 13)));
+  for(let i=0;i<12;i++){
+    const dataIndex = startIndex + i;
+    if (dataIndex >= hourly.time.length) break;
+
+    let tempH=hourly.temperature_2m[dataIndex];
+    let feelsLikeH = hourly.apparent_temperature[dataIndex];
+    if(useFahrenheit) { tempH = cToF(tempH); feelsLikeH = cToF(feelsLikeH); }
+
+    const hourLabel=new Date(hourly.time[dataIndex]).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+    const rainProbHourly = hourly.precipitation_probability?.[dataIndex] ?? 0;
+    const weatherIcon = weatherCodes[hourly.weathercode[dataIndex]]?.icon || '❓';
+    const weatherDesc = weatherCodes[hourly.weathercode[dataIndex]]?.desc || 'N/A';
+
+    hourlyGrid.innerHTML+=`<div class="forecast-box">
+      <div class="forecast-left">
+        <p class="icon">${weatherIcon}</p>
+        <p class="temp">${Math.round(tempH)}°${useFahrenheit?'F':'C'}</p>
+        <p class="rain">${weatherDesc}</p>
+      </div>
+      <div class="forecast-right">
+        <p class="time">⏰ ${hourLabel}</p>
+        <p>Feels like: ${Math.round(feelsLikeH)}°${useFahrenheit?'F':'C'}</p>
+        <p>Rain Prob: ${rainProbHourly}%</p>
+        <div class="rain-bar-container"><div class="rain-bar" style="width:${rainProbHourly}%"></div></div>
+      </div>
+    </div>`;
+  }
+
+  // Daily Forecast
+  const dailyGrid=document.getElementById('daily-grid'); dailyGrid.innerHTML='';
+  for(let i=0;i<7;i++){
+    let minT=daily.temperature_2m_min[i], maxT=daily.temperature_2m_max[i];
+    if(useFahrenheit){minT=cToF(minT); maxT=cToF(maxT);}
+    const dayLabel=new Date(daily.time[i]).toLocaleDateString([], { weekday:'short', month:'short', day:'numeric' });
+    const rainProbDaily = daily.precipitation_probability_max?.[i] ?? 0;
+    const weatherIcon = weatherCodes[daily.weathercode[i]]?.icon || '❓';
+    const weatherDesc = weatherCodes[daily.weathercode[i]]?.desc||'N/A';
+
+    dailyGrid.innerHTML+=`<div class="forecast-box">
+      <div class="forecast-left">
+        <p class="icon">${weatherIcon}</p>
+        <p class="temp">${Math.round(maxT)}° / ${Math.round(minT)}°${useFahrenheit?'F':'C'}</p>
+        <p class="rain">${weatherDesc}</p>
+      </div>
+      <div class="forecast-right">
+        <p class="date">📅 ${dayLabel}</p>
+        <p>Sunrise: ${new Date(daily.sunrise[i]).toLocaleTimeString([], { hour:'2-digit'})}</p>
+        <p>Sunset: ${new Date(daily.sunset[i]).toLocaleTimeString([], { hour:'2-digit'})}</p>
+        <p>Rain Prob: ${rainProbDaily}%</p>
+        <div class="rain-bar-container"><div class="rain-bar" style="width:${rainProbDaily}%"></div></div>
+      </div>
+    </div>`;
+  }
+
+  weatherResults.classList.remove('hidden');
+
+  if(!map){
+    map=L.map('map').setView([22.5937,78.9629],5);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+        attribution:'&copy; OpenStreetMap contributors',
+        minZoom: 4,
+        maxZoom: 10
+    }).addTo(map);
+  } else {
+    map.eachLayer(layer => { if(layer instanceof L.Marker) { map.removeLayer(layer); } });
+    map.setView([22.5937,78.9629],5);
+  }
+  indiaCities.forEach(async city=>{
+    try{
+      const url=`https://api.open-meteo.com/v1/forecast?latitude=${city.lat}&longitude=${city.lon}&current_weather=true&temperature_unit=${useFahrenheit?'fahrenheit':'celsius'}&timezone=auto`;
+      const res=await fetch(url);
+      const dat=await res.json();
+      const temp=dat.current_weather.temperature;
+      L.marker([city.lat,city.lon]).addTo(map).bindPopup(`${city.name}: ${temp}°${useFahrenheit?'F':'C'}`);
+    }catch(e){ console.error(e); }
+  });
+};
+
+const saveFavorite = (city) => {
+    let favorites = JSON.parse(localStorage.getItem('favorites')) || [];
+    const cityOnly = city.split(',')[0].trim();
+    if (!favorites.includes(cityOnly)) {
+        favorites.push(cityOnly);
+        localStorage.setItem('favorites', JSON.stringify(favorites));
+    }
+    renderFavorites();
+};
+
+const removeFavorite = (city) => {
+    let favorites = JSON.parse(localStorage.getItem('favorites')) || [];
+    favorites = favorites.filter(fav => fav !== city);
+    localStorage.setItem('favorites', JSON.stringify(favorites));
+    renderFavorites();
+};
+
+const updateSaveFavoriteButtonState = (city) => {
+    const favorites = JSON.parse(localStorage.getItem('favorites')) || [];
+    const isFavorite = favorites.includes(city);
+    if (isFavorite) {
+        saveFavoriteBtn.textContent = 'Favorite Saved';
+        saveFavoriteBtn.disabled = true;
+        saveFavoriteBtn.classList.remove('hover:bg-white/30');
+    } else {
+        saveFavoriteBtn.textContent = 'Save as Favorite';
+        saveFavoriteBtn.disabled = false;
+        saveFavoriteBtn.classList.add('hover:bg-white/30');
+    }
+};
+
+const renderFavorites = () => {
+    const favorites = JSON.parse(localStorage.getItem('favorites')) || [];
+    favoritesContainer.innerHTML = '';
+    if (favorites.length === 0) {
+        noFavoritesMessage.classList.remove('hidden');
+    } else {
+        noFavoritesMessage.classList.add('hidden');
+        favorites.forEach(city => {
+            const button = document.createElement('button');
+            button.textContent = city;
+            button.className = 'bg-white/20 text-white px-3 py-1 rounded-md text-sm transition hover:bg-white/30';
+            button.style.pointerEvents = 'auto';
+            if (city === 'Your Location') {
+                 button.onclick = () => {
+                    handleGeolocation();
+                };
+            } else {
+                button.onclick = () => {
+                    fetchCoordsByCity(city);
+                };
+            }
+            button.ondblclick = (e) => {
+                e.stopPropagation();
+                removeFavorite(city);
+            };
+            favoritesContainer.appendChild(button);
+        });
+    }
+};
+
+const fetchWeather=async(latitude,longitude,locationName)=>{
+  showLoader(true); errorMessage.classList.add('hidden'); weatherResults.classList.add('hidden');
+  try{
+    const tempUnit = useFahrenheit ? 'fahrenheit' : 'celsius';
+    const weatherUrl=`https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current_weather=true&hourly=temperature_2m,apparent_temperature,weathercode,precipitation_probability,relative_humidity_2m,wind_gusts_10m,visibility&daily=weathercode,temperature_2m_max,temperature_2m_min,sunrise,sunset,precipitation_probability_max,relative_humidity_2m_max,uv_index_max&timezone=auto&temperature_unit=${tempUnit}`;
+    const response=await fetch(weatherUrl);
+    if(!response.ok) throw new Error("Weather data not found.");
+    const data=await response.json();
+    data.locationName=locationName;
+    displayWeather(data);
+  }catch(error){ displayError(`Failed to fetch weather: ${error.message}`);}finally{ showLoader(false);}
+};
+
+const fetchCoordsByCity=async(city)=>{
+  showLoader(true); errorMessage.classList.add('hidden'); geolocationStatus.textContent=`Searching for ${city}...`;
+  try{
+    const geocodeUrl=`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=5&language=en&format=json`;
+    const response=await fetch(geocodeUrl);
+    if(!response.ok) throw new Error("Could not find location.");
+    const data=await response.json();
+    if(!data.results || data.results.length === 0) throw new Error(`No results found for ${city}.`);
+    citiesDatalist.innerHTML=''; data.results.forEach(r=>{
+      const option=document.createElement('option'); option.value=`${r.name}, ${r.admin1||r.country}`; citiesDatalist.appendChild(option);
+    });
+    const {latitude,longitude,name,admin1,country}=data.results[0]; const locationName=`${name}, ${admin1||country}`;
+    geolocationStatus.textContent=`Found: ${locationName}`;
+    fetchWeather(latitude,longitude,locationName);
+  }catch(error){ displayError(error.message); geolocationStatus.textContent='Could not find location. Please try again.';}
+  finally{ showLoader(false);}
+};
+
+locationInput.addEventListener('input', (e) => {
+    clearTimeout(debounceTimeout);
+    const query = e.target.value.trim();
+    if (query.length > 2) {
+        debounceTimeout = setTimeout(() => {
+            fetchCoordsByCity(query);
+        }, 500);
+    }
+});
+
+searchForm.addEventListener('submit',(e)=>{ e.preventDefault(); const loc=locationInput.value.trim(); if(loc) fetchCoordsByCity(loc); });
+toggleUnitsBtn.addEventListener('click',()=>{
+  useFahrenheit=!useFahrenheit; toggleUnitsBtn.textContent=useFahrenheit?"Switch to °C":"Switch to °F";
+  const loc=locationInput.value.trim(); if(loc) { fetchCoordsByCity(loc); }
+});
+
+document.addEventListener('DOMContentLoaded',()=>{
+    handleGeolocation();
+    renderFavorites(); // Load and display favorites on page load
+});
+
+saveFavoriteBtn.addEventListener('click', () => {
+    if (currentLocationName) {
+        const cityOnly = currentLocationName.split(',')[0].trim();
+        saveFavorite(cityOnly);
+    }
+});
+
+const handleGeolocation=()=>{
+  geolocationStatus.textContent='Attempting to get your location...';
+  if(navigator.geolocation){
+    navigator.geolocation.getCurrentPosition(
+      (position)=>{
+        geolocationStatus.textContent='Location found! Fetching weather...';
+        const {latitude,longitude}=position.coords;
+        fetchWeather(latitude,longitude,'Your Location');
+      },
+      (error)=>{
+        console.error('Geolocation Error:', error);
+        geolocationStatus.textContent='Location access denied. Please search for a city.';
+      }
+    );
+  } else{ geolocationStatus.textContent="Geolocation not supported. Please search for a city.";}
+};
+</script>
+</body>
+</html>
